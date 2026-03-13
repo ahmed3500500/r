@@ -19,6 +19,7 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
+import androidx.core.content.FileProvider;
 import androidx.core.content.ContextCompat;
 
 import java.io.File;
@@ -67,7 +68,7 @@ public class MainActivity extends AppCompatActivity {
         btnViewLogs.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                showLogs();
+                openLogFile();
             }
         });
 
@@ -100,6 +101,26 @@ public class MainActivity extends AppCompatActivity {
     private void showLogs() {
         String logs = CustomExceptionHandler.getLogContent(this);
         textStatus.setText(logs);
+    }
+
+    private void openLogFile() {
+        File logFile = CustomExceptionHandler.getLogFile(this);
+        if (logFile == null || !logFile.exists()) {
+            Toast.makeText(this, "No logs found.", Toast.LENGTH_LONG).show();
+            showLogs();
+            return;
+        }
+
+        Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", logFile);
+        Intent intent = new Intent(Intent.ACTION_VIEW);
+        intent.setDataAndType(uri, "text/plain");
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+        try {
+            startActivity(Intent.createChooser(intent, "Open logs"));
+        } catch (Exception e) {
+            showLogs();
+        }
     }
 
     private boolean isServiceRunning() {
