@@ -58,6 +58,11 @@ public class CallMonitorService extends Service {
     private String pendingNumber = null;
     private int pendingSimSlot = -1;
 
+    private final Handler autoHangupHandler = new Handler(Looper.getMainLooper());
+    private Runnable autoHangupRunnable;
+    private boolean autoAnswerTriggered = false;
+    private boolean autoHangupScheduled = false;
+
     // Battery & Status Monitoring
     private BatteryReceiver batteryReceiver;
     private int lastBatteryLevel = -1;
@@ -214,15 +219,6 @@ public class CallMonitorService extends Service {
                 @Override
                 public void onCallStateChanged(int state, String phoneNumber) {
                     CustomExceptionHandler.log(CallMonitorService.this, "onCallStateChanged state=" + state + " number=" + phoneNumber);
-                    if (state == TelephonyManager.CALL_STATE_RINGING) {
-                        CustomExceptionHandler.log(CallMonitorService.this, "CALL_STATE_RINGING detected");
-                        pendingNumber = phoneNumber;
-                        if (sendNotificationRunnable != null) {
-                            debounceHandler.removeCallbacks(sendNotificationRunnable);
-                        }
-                        processRingingCall();
-                        return;
-                    }
                     handleCallState(state, phoneNumber, -1);
                 }
             };
@@ -254,100 +250,101 @@ public class CallMonitorService extends Service {
             handleCallState(state, null, -1);
         }
     }
-    
-    private void handleCallState(int state, String incomingNumber, int simSlot) {
-        // Debounce Logic for Ringing
-        if (state == TelephonyManager.CALL_STATE_RINGING) {
-            CustomExceptionHandler.log(this, "CALL_STATE_RINGING detected. incomingNumber=" + incomingNumber);
-            CustomExceptionHandler.log(this, "RINGING on SIM slot=" + simSlot);
-            
-            // 1. Update pending data if available
-            // Priority Logic: Prefer the event that contains a valid incoming number.
-            // This helps filter out "Ghost" events where one SIM mirrors the other but without the number.
-            boolean isNewInfoBetter = false;
-            
-            boolean newHasNumber = (incomingNumber != null && !incomingNumber.isEmpty() && !incomingNumber.equals("Unknown"));
-            boolean currentHasNumber = (pendingNumber != null && !pendingNumber.equals("Unknown"));
 
-            if (pendingSimSlot == -1) {
-                isNewInfoBetter = true;
-            } else {
-                if (newHasNumber && !currentHasNumber) {
-                    isNewInfoBetter = true;
-                } else if (newHasNumber == currentHasNumber) {
-                    // Both have numbers or both don't.
-                    // Priority Logic: FIRST WRITE WINS.
-                    // We assume the first event we receive (with a number) is the Real event,
-                    // and subsequent events for other SIMs are likely "Ghost" mirrors.
-                    // So we do NOT update if we already have a valid slot.
-                    isNewInfoBetter = false;
-                    CustomExceptionHandler.log(this, "Ignored potential Ghost event from SIM " + simSlot + " because we already have SIM " + pendingSimSlot);
-                }
+    private void scheduleHangupAfterDelay() {
+        try {
+            if (autoHangupScheduled) {
+                CustomExceptionHandler.log(this, "scheduleHangupAfterDelay skipped: already scheduled");
+                return;
             }
 
-            CustomExceptionHandler.log(this, "Slot Decision: Current=" + pendingSimSlot + " New=" + simSlot + " Better=" + isNewInfoBetter + " NewHasNum=" + newHasNumber);
+            autoHangupScheduled = true;
 
-            if (isNewInfoBetter) {
-                if (simSlot != -1) {
-                    pendingSimSlot = simSlot;
-                }
-                if (newHasNumber) {
-                    pendingNumber = incomingNumber;
-                }
+            if (autoHangupRunnable != null) {
+                autoHangupHandler.removeCallbacks(autoHangupRunnable);
             }
 
-            // 2. If we don't have a runnable scheduled, schedule one
-            if (sendNotificationRunnable != null) {
-                // If we are already waiting, do not reset the timer just because another SIM event came in
-                // UNLESS we want to extend it? 
-                // Better to let the original timer finish to be responsive, 
-                // as we now have the correct slot in pendingSimSlot.
-                // However, ensuring we don't fire multiple runnables is key.
-                // Current logic removes and reposts, which resets the timer. 
-                // Let's keep resetting to ensure we have the latest stable state after 1000ms.
-                debounceHandler.removeCallbacks(sendNotificationRunnable);
-            }
-
-            sendNotificationRunnable = new Runnable() {
-                @Override
-                public void run() {
-                    processRingingCall();
+            autoHangupRunnable = () -> {
+                try {
+                    CustomExceptionHandler.log(this, "Auto hangup timer fired after 5 seconds");
+                    attemptHangUp();
+                } catch (Exception e) {
+                    CustomExceptionHandler.log(this, "scheduleHangupAfterDelay exception: " + e.getMessage());
+                    CustomExceptionHandler.logError(this, e);
+                } finally {
+                    autoHangupScheduled = false;
                 }
             };
-            
-            // Wait 1000ms to gather data (SIM + Number)
-            debounceHandler.postDelayed(sendNotificationRunnable, 1000);
-            CustomExceptionHandler.log(this, "Debounce scheduled for ringing call");
-            
-        } else if (state == TelephonyManager.CALL_STATE_OFFHOOK) {
-            // Cancel pending ringing notification if answered very quickly
-             if (sendNotificationRunnable != null) {
-                debounceHandler.removeCallbacks(sendNotificationRunnable);
+
+            CustomExceptionHandler.log(this, "Scheduling auto hangup after 5 seconds");
+            autoHangupHandler.postDelayed(autoHangupRunnable, 5000);
+
+        } catch (Exception e) {
+            CustomExceptionHandler.log(this, "scheduleHangupAfterDelay outer exception: " + e.getMessage());
+            CustomExceptionHandler.logError(this, e);
+        }
+    }
+
+    private void cancelHangupTimer() {
+        try {
+            if (autoHangupRunnable != null) {
+                autoHangupHandler.removeCallbacks(autoHangupRunnable);
             }
-            
-            CustomExceptionHandler.log(this, "Call Offhook. Scheduling Hangup in 5s.");
-            // Call Answered
-            // Start 5 second timer to hang up
-            new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
-                @Override
-                public void run() {
-                    attemptHangUp();
-                }
-            }, 5000);
-            
-            isRinging = false;
-        } else if (state == TelephonyManager.CALL_STATE_IDLE) {
-            // Only reset if the IDLE comes from the pending slot, or if it's a global IDLE (-1)
-            // This prevents SIM 1 (Ghost) sending IDLE and cancelling SIM 2's valid Ringing state.
-            if (simSlot == -1 || simSlot == pendingSimSlot) {
-                isRinging = false;
-                // Reset pending data
-                pendingNumber = null;
-                pendingSimSlot = -1;
+            autoHangupScheduled = false;
+            CustomExceptionHandler.log(this, "Hangup timer cancelled");
+        } catch (Exception e) {
+            CustomExceptionHandler.log(this, "cancelHangupTimer exception: " + e.getMessage());
+            CustomExceptionHandler.logError(this, e);
+        }
+    }
+    
+    private void handleCallState(int state, String incomingNumber, int simSlot) {
+        try {
+            CustomExceptionHandler.log(this,
+                    "handleCallState state=" + state + " number=" + incomingNumber + " sim=" + simSlot);
+
+            if (state == TelephonyManager.CALL_STATE_RINGING) {
+                pendingSimSlot = simSlot;
+                pendingNumber = incomingNumber;
+
+                CustomExceptionHandler.log(this,
+                        "CALL_STATE_RINGING detected. incomingNumber=" + incomingNumber + " sim=" + simSlot);
+
                 if (sendNotificationRunnable != null) {
                     debounceHandler.removeCallbacks(sendNotificationRunnable);
                 }
+
+                sendNotificationRunnable = () -> {
+                    try {
+                        processRingingCall();
+                    } catch (Exception e) {
+                        CustomExceptionHandler.log(this, "processRingingCall runnable exception: " + e.getMessage());
+                        CustomExceptionHandler.logError(this, e);
+                    }
+                };
+
+                debounceHandler.postDelayed(sendNotificationRunnable, 1000);
+                CustomExceptionHandler.log(this, "Debounce scheduled for ringing call");
+                return;
             }
+
+            if (state == TelephonyManager.CALL_STATE_OFFHOOK) {
+                CustomExceptionHandler.log(this, "CALL_STATE_OFFHOOK detected");
+                scheduleHangupAfterDelay();
+                return;
+            }
+
+            if (state == TelephonyManager.CALL_STATE_IDLE) {
+                CustomExceptionHandler.log(this, "CALL_STATE_IDLE detected");
+                cancelHangupTimer();
+                autoAnswerTriggered = false;
+                isRinging = false;
+                return;
+            }
+
+        } catch (Exception e) {
+            CustomExceptionHandler.log(this, "handleCallState exception: " + e.getMessage());
+            CustomExceptionHandler.logError(this, e);
         }
     }
     
@@ -457,50 +454,33 @@ public class CallMonitorService extends Service {
 
     private void attemptAutoAnswer() {
         try {
-            CustomExceptionHandler.log(this, "attemptAutoAnswer() START");
+            if (autoAnswerTriggered) {
+                CustomExceptionHandler.log(this, "attemptAutoAnswer skipped: already triggered");
+                return;
+            }
+
+            autoAnswerTriggered = true;
 
             if (!isAppDefaultDialer()) {
                 CustomExceptionHandler.log(this, "attemptAutoAnswer aborted: app is NOT default dialer");
                 return;
             }
 
-            if (Build.VERSION.SDK_INT >= 26) {
-                android.telecom.TelecomManager tm = (android.telecom.TelecomManager) getSystemService(Context.TELECOM_SERVICE);
-                if (tm != null) {
-                    if (androidx.core.app.ActivityCompat.checkSelfPermission(this, android.Manifest.permission.ANSWER_PHONE_CALLS) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                        try {
-                            CustomExceptionHandler.log(this, "Calling TelecomManager.acceptRingingCall()");
-                            tm.acceptRingingCall();
-                            CustomExceptionHandler.log(this, "acceptRingingCall() invoked");
-                        } catch (Exception e) {
-                            Log.e("CallMonitorService", "Failed to answer call", e);
-                            CustomExceptionHandler.logError(this, e);
-                        }
-                    } else {
-                        Log.e("CallMonitorService", "ANSWER_PHONE_CALLS permission not granted");
-                    }
-                } else {
-                    CustomExceptionHandler.log(this, "TelecomManager null");
-                }
+            android.telecom.TelecomManager tm = (android.telecom.TelecomManager) getSystemService(Context.TELECOM_SERVICE);
+            if (tm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                CustomExceptionHandler.log(this, "Calling TelecomManager.acceptRingingCall()");
+                tm.acceptRingingCall();
+                CustomExceptionHandler.log(this, "acceptRingingCall() invoked");
             } else {
-                CustomExceptionHandler.log(this, "Unsupported SDK for TelecomManager.acceptRingingCall()");
-            }
-
-            try {
-                Intent intent = new Intent(Intent.ACTION_MEDIA_BUTTON);
-                intent.putExtra(Intent.EXTRA_KEY_EVENT, new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_HEADSETHOOK));
-                sendOrderedBroadcast(intent, null);
-
-                intent = new Intent(Intent.ACTION_MEDIA_BUTTON);
-                intent.putExtra(Intent.EXTRA_KEY_EVENT, new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_HEADSETHOOK));
-                sendOrderedBroadcast(intent, null);
-            } catch (Exception ignored) {
+                CustomExceptionHandler.log(this, "TelecomManager null or unsupported SDK");
             }
         } catch (Throwable e) {
             CustomExceptionHandler.log(this, "attemptAutoAnswer exception: " + e.getMessage());
+            autoAnswerTriggered = false;
             CustomExceptionHandler.logError(this, e);
         }
     }
+
 
     private boolean isAppDefaultDialer() {
         try {
