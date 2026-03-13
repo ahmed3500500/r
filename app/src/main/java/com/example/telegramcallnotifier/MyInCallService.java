@@ -3,6 +3,7 @@ package com.example.telegramcallnotifier;
 import android.telecom.Call;
 import android.telecom.InCallService;
 import android.util.Log;
+import android.content.Intent;
 
 public class MyInCallService extends InCallService {
 
@@ -14,6 +15,10 @@ public class MyInCallService extends InCallService {
         currentCall = call;
         Log.d("MyInCallService", "Call added");
         CustomExceptionHandler.log(this, "MyInCallService: Call added");
+
+        Intent intent = new Intent(this, InCallActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        startActivity(intent);
     }
 
     @Override

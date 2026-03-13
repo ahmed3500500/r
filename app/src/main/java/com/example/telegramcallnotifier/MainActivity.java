@@ -74,8 +74,6 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // Try auto-start if permissions allow, otherwise flow will handle it
-        checkPermissionsAndStartService(); 
         updateUI();
 
         // Log start
