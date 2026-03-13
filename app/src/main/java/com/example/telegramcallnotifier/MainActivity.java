@@ -220,8 +220,11 @@ public class MainActivity extends AppCompatActivity {
         if (!listPermissionsNeeded.isEmpty()) {
             ActivityCompat.requestPermissions(this, listPermissionsNeeded.toArray(new String[0]), PERMISSION_REQUEST_CODE);
         } else {
-            requestDefaultDialerRoleIfNeeded();
-            checkExactAlarmAndStart();
+            if (isAppDefaultDialer()) {
+                checkExactAlarmAndStart();
+            } else {
+                requestDefaultDialerRoleIfNeeded();
+            }
         }
     }
 
@@ -246,11 +249,22 @@ public class MainActivity extends AppCompatActivity {
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == PERMISSION_REQUEST_CODE) {
-            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                requestDefaultDialerRoleIfNeeded();
-                checkExactAlarmAndStart();
+            boolean allGranted = true;
+            for (int result : grantResults) {
+                if (result != PackageManager.PERMISSION_GRANTED) {
+                    allGranted = false;
+                    break;
+                }
+            }
+
+            if (allGranted) {
+                if (isAppDefaultDialer()) {
+                    checkExactAlarmAndStart();
+                } else {
+                    requestDefaultDialerRoleIfNeeded();
+                }
             } else {
-                Toast.makeText(this, "Permissions are required for the app to work", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "All required permissions must be granted", Toast.LENGTH_LONG).show();
             }
         }
     }
@@ -258,6 +272,17 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+
+        if (requestCode == REQ_DIALER_ROLE || requestCode == REQ_CHANGE_DEFAULT_DIALER) {
+            if (isAppDefaultDialer()) {
+                CustomExceptionHandler.log(this, "Default dialer granted");
+                checkExactAlarmAndStart();
+            } else {
+                CustomExceptionHandler.log(this, "Default dialer NOT granted");
+                Toast.makeText(this, "Please set the app as default Phone app for auto answer", Toast.LENGTH_LONG).show();
+            }
+            return;
+        }
 
         if (requestCode == BATTERY_OPTIMIZATION_REQUEST_CODE) {
             startService();
