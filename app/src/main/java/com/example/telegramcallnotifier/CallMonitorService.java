@@ -188,6 +188,8 @@ public class CallMonitorService extends Service {
             PhoneStateListener listener = new PhoneStateListener() {
                 @Override
                 public void onCallStateChanged(int state, String phoneNumber) {
+                    CustomExceptionHandler.log(CallMonitorService.this,
+                            "onCallStateChanged state=" + state + " number=" + phoneNumber);
                     // Strict Verification: Ensure this specific SIM is actually the one ringing
                     if (state == TelephonyManager.CALL_STATE_RINGING) {
                         if (subTm.getCallState() == TelephonyManager.CALL_STATE_RINGING) {
@@ -213,6 +215,8 @@ public class CallMonitorService extends Service {
             phoneStateListener = new PhoneStateListener() {
                 @Override
                 public void onCallStateChanged(int state, String phoneNumber) {
+                    CustomExceptionHandler.log(CallMonitorService.this,
+                            "onCallStateChanged state=" + state + " number=" + phoneNumber);
                     handleCallState(state, phoneNumber, -1);
                 }
             };
@@ -240,6 +244,8 @@ public class CallMonitorService extends Service {
     private class CallStateCallback extends TelephonyCallback implements TelephonyCallback.CallStateListener {
         @Override
         public void onCallStateChanged(int state) {
+            CustomExceptionHandler.log(CallMonitorService.this,
+                    "onCallStateChanged state=" + state + " number=" + null);
             handleCallState(state, null, -1);
         }
     }
