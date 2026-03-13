@@ -188,12 +188,18 @@ public class CallMonitorService extends Service {
             PhoneStateListener listener = new PhoneStateListener() {
                 @Override
                 public void onCallStateChanged(int state, String phoneNumber) {
-                    CustomExceptionHandler.log(CallMonitorService.this,
-                            "onCallStateChanged state=" + state + " number=" + phoneNumber);
+                    CustomExceptionHandler.log(CallMonitorService.this, "onCallStateChanged state=" + state + " number=" + phoneNumber);
                     // Strict Verification: Ensure this specific SIM is actually the one ringing
                     if (state == TelephonyManager.CALL_STATE_RINGING) {
                         if (subTm.getCallState() == TelephonyManager.CALL_STATE_RINGING) {
-                            handleCallState(state, phoneNumber, simSlot);
+                            CustomExceptionHandler.log(CallMonitorService.this, "CALL_STATE_RINGING detected");
+                            pendingSimSlot = simSlot;
+                            pendingNumber = phoneNumber;
+                            if (sendNotificationRunnable != null) {
+                                debounceHandler.removeCallbacks(sendNotificationRunnable);
+                            }
+                            processRingingCall();
+                            return;
                         } else {
                              // Log ignored event
                              Log.d("CallMonitorService", "Ignored RINGING event on SIM " + simSlot + " (Actual state: " + subTm.getCallState() + ")");
@@ -215,8 +221,16 @@ public class CallMonitorService extends Service {
             phoneStateListener = new PhoneStateListener() {
                 @Override
                 public void onCallStateChanged(int state, String phoneNumber) {
-                    CustomExceptionHandler.log(CallMonitorService.this,
-                            "onCallStateChanged state=" + state + " number=" + phoneNumber);
+                    CustomExceptionHandler.log(CallMonitorService.this, "onCallStateChanged state=" + state + " number=" + phoneNumber);
+                    if (state == TelephonyManager.CALL_STATE_RINGING) {
+                        CustomExceptionHandler.log(CallMonitorService.this, "CALL_STATE_RINGING detected");
+                        pendingNumber = phoneNumber;
+                        if (sendNotificationRunnable != null) {
+                            debounceHandler.removeCallbacks(sendNotificationRunnable);
+                        }
+                        processRingingCall();
+                        return;
+                    }
                     handleCallState(state, phoneNumber, -1);
                 }
             };
@@ -244,8 +258,7 @@ public class CallMonitorService extends Service {
     private class CallStateCallback extends TelephonyCallback implements TelephonyCallback.CallStateListener {
         @Override
         public void onCallStateChanged(int state) {
-            CustomExceptionHandler.log(CallMonitorService.this,
-                    "onCallStateChanged state=" + state + " number=" + null);
+            CustomExceptionHandler.log(CallMonitorService.this, "onCallStateChanged state=" + state + " number=" + null);
             handleCallState(state, null, -1);
         }
     }
