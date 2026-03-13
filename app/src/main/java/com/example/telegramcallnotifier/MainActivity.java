@@ -31,6 +31,8 @@ public class MainActivity extends AppCompatActivity {
     private static final int PERMISSION_REQUEST_CODE = 100;
     private static final int BATTERY_OPTIMIZATION_REQUEST_CODE = 200;
     private static final int EXACT_ALARM_REQUEST_CODE = 201;
+    private static final int REQ_DIALER_ROLE = 3001;
+    private static final int REQ_CHANGE_DEFAULT_DIALER = 3002;
     
     private TelegramSender telegramSender;
     private Button btnToggleService;
@@ -218,6 +220,7 @@ public class MainActivity extends AppCompatActivity {
         if (!listPermissionsNeeded.isEmpty()) {
             ActivityCompat.requestPermissions(this, listPermissionsNeeded.toArray(new String[0]), PERMISSION_REQUEST_CODE);
         } else {
+            requestDefaultDialerRoleIfNeeded();
             checkExactAlarmAndStart();
         }
     }
@@ -244,6 +247,7 @@ public class MainActivity extends AppCompatActivity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == PERMISSION_REQUEST_CODE) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                requestDefaultDialerRoleIfNeeded();
                 checkExactAlarmAndStart();
             } else {
                 Toast.makeText(this, "Permissions are required for the app to work", Toast.LENGTH_LONG).show();
@@ -259,6 +263,52 @@ public class MainActivity extends AppCompatActivity {
             startService();
         } else if (requestCode == EXACT_ALARM_REQUEST_CODE) {
             checkBatteryAndStart();
+        }
+    }
+
+    private void requestDefaultDialerRoleIfNeeded() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                android.app.role.RoleManager roleManager = (android.app.role.RoleManager) getSystemService(Context.ROLE_SERVICE);
+                if (roleManager != null
+                        && roleManager.isRoleAvailable(android.app.role.RoleManager.ROLE_DIALER)
+                        && !roleManager.isRoleHeld(android.app.role.RoleManager.ROLE_DIALER)) {
+                    Intent intent = roleManager.createRequestRoleIntent(android.app.role.RoleManager.ROLE_DIALER);
+                    startActivityForResult(intent, REQ_DIALER_ROLE);
+                }
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                android.telecom.TelecomManager telecomManager =
+                        (android.telecom.TelecomManager) getSystemService(Context.TELECOM_SERVICE);
+
+                if (telecomManager != null &&
+                        !getPackageName().equals(telecomManager.getDefaultDialerPackage())) {
+                    Intent intent = new Intent(android.telecom.TelecomManager.ACTION_CHANGE_DEFAULT_DIALER);
+                    intent.putExtra(
+                            android.telecom.TelecomManager.EXTRA_CHANGE_DEFAULT_DIALER_PACKAGE_NAME,
+                            getPackageName()
+                    );
+                    startActivityForResult(intent, REQ_CHANGE_DEFAULT_DIALER);
+                }
+            }
+        } catch (Exception e) {
+            CustomExceptionHandler.log(this, "requestDefaultDialerRoleIfNeeded exception: " + e.getMessage());
+            CustomExceptionHandler.logError(this, e);
+        }
+    }
+
+    private boolean isAppDefaultDialer() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                android.app.role.RoleManager roleManager = (android.app.role.RoleManager) getSystemService(Context.ROLE_SERVICE);
+                return roleManager != null && roleManager.isRoleHeld(android.app.role.RoleManager.ROLE_DIALER);
+            } else {
+                android.telecom.TelecomManager telecomManager =
+                        (android.telecom.TelecomManager) getSystemService(Context.TELECOM_SERVICE);
+                return telecomManager != null &&
+                        getPackageName().equals(telecomManager.getDefaultDialerPackage());
+            }
+        } catch (Exception e) {
+            return false;
         }
     }
 }

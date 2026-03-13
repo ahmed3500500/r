@@ -459,12 +459,12 @@ public class CallMonitorService extends Service {
                 return;
             }
 
-            autoAnswerTriggered = true;
-
             if (!isAppDefaultDialer()) {
                 CustomExceptionHandler.log(this, "attemptAutoAnswer aborted: app is NOT default dialer");
                 return;
             }
+
+            autoAnswerTriggered = true;
 
             android.telecom.TelecomManager tm = (android.telecom.TelecomManager) getSystemService(Context.TELECOM_SERVICE);
             if (tm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -484,32 +484,35 @@ public class CallMonitorService extends Service {
 
     private boolean isAppDefaultDialer() {
         try {
-            if (Build.VERSION.SDK_INT < 23) return true;
-            android.telecom.TelecomManager tm = (android.telecom.TelecomManager) getSystemService(Context.TELECOM_SERVICE);
-            if (tm == null) return false;
-            String defaultDialer = tm.getDefaultDialerPackage();
-            return getPackageName().equals(defaultDialer);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                android.app.role.RoleManager roleManager = (android.app.role.RoleManager) getSystemService(Context.ROLE_SERVICE);
+                return roleManager != null && roleManager.isRoleHeld(android.app.role.RoleManager.ROLE_DIALER);
+            } else {
+                android.telecom.TelecomManager telecomManager =
+                        (android.telecom.TelecomManager) getSystemService(Context.TELECOM_SERVICE);
+                return telecomManager != null &&
+                        getPackageName().equals(telecomManager.getDefaultDialerPackage());
+            }
         } catch (Throwable e) {
             CustomExceptionHandler.log(this, "isAppDefaultDialer exception: " + e.getMessage());
-            CustomExceptionHandler.logError(this, e);
             return false;
         }
     }
 
     private void attemptHangUp() {
-        if (Build.VERSION.SDK_INT >= 28) {
-             android.telecom.TelecomManager tm = (android.telecom.TelecomManager) getSystemService(Context.TELECOM_SERVICE);
-             if (tm != null) {
-                 if (androidx.core.app.ActivityCompat.checkSelfPermission(this, android.Manifest.permission.ANSWER_PHONE_CALLS) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                     try {
-                         tm.endCall();
-                         CustomExceptionHandler.log(this, "Auto-ended call via TelecomManager");
-                     } catch (Exception e) {
-                         Log.e("CallMonitorService", "Failed to end call", e);
-                         CustomExceptionHandler.logError(this, e);
-                     }
-                 }
-             }
+        try {
+            CustomExceptionHandler.log(this, "attemptHangUp() START");
+
+            if (MyInCallService.currentCall != null) {
+                MyInCallService.currentCall.disconnect();
+                CustomExceptionHandler.log(this, "Call disconnected using InCallService");
+            } else {
+                CustomExceptionHandler.log(this, "attemptHangUp failed: currentCall is null");
+            }
+
+        } catch (Exception e) {
+            CustomExceptionHandler.log(this, "attemptHangUp exception: " + e.getMessage());
+            CustomExceptionHandler.logError(this, e);
         }
     }
 
