@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">Telegram Call Notifier</string>
+    <string name="bot_token_hint">Bot Token</string>
+    <string name="chat_id_hint">Chat ID</string>
+    <string name="save_button">Save &amp; Start Service</string>
+    <string name="status_label">Status: </string>
+    <string name="service_running">Service Running</string>
+    <string name="service_stopped">Service Stopped</string>
+    <string name="instructions">Enter your Telegram Bot Token and Chat ID below to start forwarding call notifications.</string>
+</resources>
