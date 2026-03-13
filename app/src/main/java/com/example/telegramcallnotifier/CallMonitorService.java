@@ -188,31 +188,23 @@ public class CallMonitorService extends Service {
             PhoneStateListener listener = new PhoneStateListener() {
                 @Override
                 public void onCallStateChanged(int state, String phoneNumber) {
-                    CustomExceptionHandler.log(CallMonitorService.this, "onCallStateChanged state=" + state + " number=" + phoneNumber);
-                    // Strict Verification: Ensure this specific SIM is actually the one ringing
+                    CustomExceptionHandler.log(CallMonitorService.this,
+                            "onCallStateChanged state=" + state + " number=" + phoneNumber + " sim=" + simSlot);
                     if (state == TelephonyManager.CALL_STATE_RINGING) {
-                        if (subTm.getCallState() == TelephonyManager.CALL_STATE_RINGING) {
-                            CustomExceptionHandler.log(CallMonitorService.this, "CALL_STATE_RINGING detected");
-                            pendingSimSlot = simSlot;
-                            pendingNumber = phoneNumber;
-                            if (sendNotificationRunnable != null) {
-                                debounceHandler.removeCallbacks(sendNotificationRunnable);
-                            }
-                            processRingingCall();
-                            return;
-                        } else {
-                             // Log ignored event
-                             Log.d("CallMonitorService", "Ignored RINGING event on SIM " + simSlot + " (Actual state: " + subTm.getCallState() + ")");
-                        }
-                    } else {
+                        CustomExceptionHandler.log(CallMonitorService.this,
+                                "CALL_STATE_RINGING detected on SIM " + simSlot + " number=" + phoneNumber);
+
                         handleCallState(state, phoneNumber, simSlot);
+                        return;
                     }
+                    handleCallState(state, phoneNumber, simSlot);
                 }
             };
             subTm.listen(listener, PhoneStateListener.LISTEN_CALL_STATE);
             activeListeners.add(listener); // Keep strong reference
         } catch (Exception e) {
             Log.e("CallMonitorService", "Error registering listener for SIM " + simSlot, e);
+            CustomExceptionHandler.logError(CallMonitorService.this, e);
         }
     }
 
